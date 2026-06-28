@@ -1,31 +1,18 @@
 // ═══════════════════════════════════════════════════════════════════════════
 //  src/utils/geminiApi.js
-//  Gemini 1.5 Flash — Cognitive Analysis Engine
+//  Gemini API Integration
 //
-//  Sends the raw email text PLUS the pre-computed rule-based analysis to
-//  Gemini. Providing structured pre-analysis data gives the model concrete
-//  evidence anchors, reducing hallucination and improving verdict consistency.
+//  Model: gemini-2.0-flash  (confirmed working on v1beta, June 2026)
 //
-//  Model: gemini-1.5-flash  (fast, cheap, excellent JSON instruction-following)
-//  Endpoint: POST https://generativelanguage.googleapis.com/v1beta/models/
-//            gemini-1.5-flash:generateContent?key={API_KEY}
-//
-//  responseMimeType: 'application/json' tells Gemini to output raw JSON —
-//  no markdown fences, no preamble text. This is the most reliable way to
-//  get clean, parseable JSON from the model.
+//  If you hit a "model not found" error in future, replace GEMINI_MODEL with
+//  any model from this list endpoint:
+//  https://generativelanguage.googleapis.com/v1beta/models?key=YOUR_KEY
 // ═══════════════════════════════════════════════════════════════════════════
 
-const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent';
+const GEMINI_MODEL    = 'gemini-2.0-flash';
+const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
+const GEMINI_ENDPOINT = `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent`;
 
-// ───────────────────────────────────────────────────────────────────────────
-//  PROMPT BUILDER
-//  The prompt is structured in three sections:
-//    1. Role + task framing
-//    2. Raw email content
-//    3. Pre-computed rule findings (JSON) to anchor the model's analysis
-//  The output schema is explicitly specified so the model fills in each field
-//  deterministically rather than choosing its own structure.
-// ───────────────────────────────────────────────────────────────────────────
 function buildPrompt(emailText, ruleData) {
   return `You are a Senior SOC Analyst and Threat Intelligence Specialist with 10 years of experience in email security, phishing detection, and Business Email Compromise (BEC) investigations.
 
@@ -48,44 +35,34 @@ Produce your threat assessment as a single JSON object. All string values must b
   ],
   "reasoning": "<2–3 sentence forensic-level technical analysis. Name specific indicators. Explain why this verdict was reached.>",
   "indicators": [
-    "<specific, concrete IOC or red flag found in this email — e.g. domain name, header field, phrase, structural anomaly>"
+    "<specific, concrete IOC or red flag found in this email>"
   ],
   "recommendedActions": [
-    "<specific, actionable SOC response step — e.g. 'Block domain evil.ru at email gateway', 'Submit bit.ly/3xK9mPq to URLscan.io for detonation'>"
+    "<specific, actionable SOC response step>"
   ],
   "employeeChecklist": {
-    "suspicious_sender": <true/false — sender address looks fake, spoofed, or mismatched>,
-    "mismatched_domains": <true/false — display name does not match actual routing domain>,
-    "urgent_language": <true/false — uses time pressure, threats, or URGENT framing>,
-    "requests_credentials": <true/false — asks for passwords, logins, OTPs, or personal data>,
-    "suspicious_links": <true/false — contains obfuscated, shortened, or trap URLs>,
-    "unusual_attachments": <true/false — references attachments, QR codes, or embedded files>,
-    "too_good_to_be_true": <true/false — offers prizes, unexpected refunds, or windfalls>,
-    "generic_greeting": <true/false — uses "Dear Customer / User" instead of recipient name>
+    "suspicious_sender": <true/false>,
+    "mismatched_domains": <true/false>,
+    "urgent_language": <true/false>,
+    "requests_credentials": <true/false>,
+    "suspicious_links": <true/false>,
+    "unusual_attachments": <true/false>,
+    "too_good_to_be_true": <true/false>,
+    "generic_greeting": <true/false>
   }
 }`;
 }
 
-
-// ───────────────────────────────────────────────────────────────────────────
-//  GEMINI API CALL
-//  Sends the constructed prompt to Gemini and parses the JSON response.
-//  Throws descriptive errors so the UI can surface them directly to the user.
-// ───────────────────────────────────────────────────────────────────────────
 export async function analyzeWithGemini(emailText, ruleData, apiKey) {
   const prompt = buildPrompt(emailText, ruleData);
 
   const requestBody = {
-    contents: [
-      {
-        parts: [{ text: prompt }],
-      },
-    ],
+    contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
-      temperature: 0.1,        // Low temperature = deterministic, consistent JSON
+      temperature: 0.1,
       topP: 0.95,
       maxOutputTokens: 1500,
-      responseMimeType: 'application/json', // Force raw JSON output (no fences)
+      responseMimeType: 'application/json',
     },
   };
 
@@ -106,10 +83,13 @@ export async function analyzeWithGemini(emailText, ruleData, apiKey) {
       const errData = await response.json();
       if (errData?.error?.message) {
         errorMessage = errData.error.message;
-        // Provide user-friendly messages for common errors
-        if (response.status === 400) errorMessage = `Invalid request: ${errData.error.message}`;
-        if (response.status === 401 || response.status === 403) errorMessage = 'Invalid or missing API key. Check your Gemini API key.';
-        if (response.status === 429) errorMessage = 'Rate limit exceeded. Wait a moment and try again.';
+        if (response.status === 400) errorMessage = `Bad request: ${errData.error.message}`;
+        if (response.status === 401 || response.status === 403)
+          errorMessage = 'Invalid or missing API key. Check the key you entered.';
+        if (response.status === 429)
+          errorMessage = 'Rate limit hit. Wait a moment then try again.';
+        if (response.status === 404)
+          errorMessage = `Model not found: ${GEMINI_MODEL}. Open src/utils/geminiApi.js and update GEMINI_MODEL.`;
       }
     } catch { /* use generic message */ }
     throw new Error(errorMessage);
@@ -119,29 +99,21 @@ export async function analyzeWithGemini(emailText, ruleData, apiKey) {
   const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 
   if (!rawText) {
-    // Check for safety blocks
     const finishReason = data?.candidates?.[0]?.finishReason;
-    if (finishReason === 'SAFETY') {
-      throw new Error('Gemini blocked this request due to safety filters. Try removing any sensitive personal data from the email before submitting.');
-    }
+    if (finishReason === 'SAFETY')
+      throw new Error('Gemini blocked this request (safety filters). Strip personal data from the email and try again.');
     throw new Error('Empty response from Gemini API.');
   }
 
-  // ── JSON parsing with fallback ─────────────────────────────────────────
-  // Even with responseMimeType: 'application/json', occasionally the model
-  // wraps output in ```json fences. Strip them defensively.
   const cleaned = rawText.replace(/^```(?:json)?\s*/m, '').replace(/\s*```$/m, '').trim();
 
   try {
     return JSON.parse(cleaned);
   } catch {
-    // Last-resort: try to extract a JSON object from within the response
     const jsonBlock = cleaned.match(/\{[\s\S]+\}/);
     if (jsonBlock) {
-      try {
-        return JSON.parse(jsonBlock[0]);
-      } catch { /* fall through to throw */ }
+      try { return JSON.parse(jsonBlock[0]); } catch { /* fall through */ }
     }
-    throw new Error('Failed to parse Gemini response as JSON. The model may have returned an unexpected format — try again.');
+    throw new Error('Could not parse Gemini response as JSON. Try again.');
   }
 }
