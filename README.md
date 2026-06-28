@@ -2,8 +2,8 @@
 
 A browser-based phishing email analysis tool. Paste any suspicious email and get a structured threat verdict in seconds — no installation required.
 
-**[▶ Open PhishTriage](https://YOUR-USERNAME.github.io/YOUR-REPO-NAME/)**
-> *(Replace the link above with your actual GitHub Pages URL after deploying)*
+**[▶ Open PhishTriage](https://omarfadel112.github.io/phishtriage/)**
+
 
 ---
 
