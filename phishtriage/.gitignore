@@ -1,0 +1,34 @@
+# ── Dependencies ──────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ── Build output ───────────────────────────────────────────────
+# GitHub Actions builds this automatically — don't commit it manually
+dist/
+dist-ssr/
+
+# ── Environment variables ──────────────────────────────────────
+# NEVER commit .env — it contains your Gemini API key!
+# Users enter their own API key in the app UI instead.
+.env
+.env.local
+.env.*.local
+
+# .env.example IS safe to commit (it has no real keys)
+
+# ── Editor / OS clutter ────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.local
+.vscode/settings.json
+.idea/
+
+# ── Logs ──────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# ── Vite cache ─────────────────────────────────────────────────
+.vite/

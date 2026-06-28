@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Custom scrollbar — SOC terminal aesthetic ── */
+::-webkit-scrollbar        { width: 4px; height: 4px; }
+::-webkit-scrollbar-track  { background: #0a0e1f; }
+::-webkit-scrollbar-thumb  { background: #1e3a5f; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #2563eb; }
+
+/* ── Spinner keyframe ── */
+@keyframes spin   { to { transform: rotate(360deg); } }
+@keyframes fadein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes pulse-border {
+  0%, 100% { border-color: #7f1d1d; }
+  50%       { border-color: #ef4444; }
+}
+
+.spinner {
+  width: 14px; height: 14px;
+  border: 2px solid rgba(255,255,255,.2);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+  flex-shrink: 0;
+}
+
+.fadein { animation: fadein .3s ease both; }
+
+.malicious-border { animation: pulse-border 1.5s ease-in-out infinite; }
+
+/* ── Textarea placeholder ── */
+textarea::placeholder { color: #334155; }
+input::placeholder    { color: #475569; }
