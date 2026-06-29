@@ -11,7 +11,7 @@ const BASE_URL = 'https://generativelanguage.googleapis.com/v1/models';
 function buildPrompt(emailText, ruleData) {
   return `You are a Senior SOC Analyst specializing in email threat intelligence and phishing forensics.
 
-Analyze the email and pre-computed rule findings below. Your response must be a single raw JSON object — no markdown, no code fences, no text before or after the JSON.
+Analyze the email and pre-computed rule findings below. Return ONLY a valid JSON object. Do not include markdown formatting, backticks, or conversational text.
 
 === RAW EMAIL ===
 ${emailText}
@@ -19,26 +19,27 @@ ${emailText}
 === RULE-BASED PRE-ANALYSIS ===
 ${JSON.stringify(ruleData, null, 2)}
 
-Return exactly this JSON structure:
+Return exactly this JSON structure (replace the example values with your actual analysis):
 {
-  "threatScore": <integer 0-100>,
-  "verdict": "<exactly one of: Safe (Close) | Suspicious (Warn User) | Malicious (Block Domain & Escalate)>",
-  "attackType": "<BEC | Credential Phishing | TOAD/Callback Scam | Quishing | Spear Phishing | CEO Fraud | Invoice Fraud | Malware Delivery | Account Takeover | Other>",
-  "cognitiveTriggers": ["<Authority | Urgency | Fear | Greed | Curiosity | Social Proof | Scarcity>"],
-  "reasoning": "<2-3 sentence forensic analysis>",
-  "indicators": ["<specific IOC found in this email>"],
-  "recommendedActions": ["<specific SOC response step>"],
+  "threatScore": 95,
+  "verdict": "Malicious (Block Domain & Escalate)",
+  "attackType": "Credential Phishing",
+  "cognitiveTriggers": ["Urgency", "Fear"],
+  "reasoning": "2-3 sentence forensic analysis goes here.",
+  "indicators": ["malicious-domain.com", "fake-sso-link"],
+  "recommendedActions": ["Block sender", "Reset user password"],
   "employeeChecklist": {
-    "suspicious_sender": <true/false>,
-    "mismatched_domains": <true/false>,
-    "urgent_language": <true/false>,
-    "requests_credentials": <true/false>,
-    "suspicious_links": <true/false>,
-    "unusual_attachments": <true/false>,
-    "too_good_to_be_true": <true/false>,
-    "generic_greeting": <true/false>
+    "suspicious_sender": true,
+    "mismatched_domains": true,
+    "urgent_language": true,
+    "requests_credentials": true,
+    "suspicious_links": true,
+    "unusual_attachments": false,
+    "too_good_to_be_true": false,
+    "generic_greeting": false
   }
 }`;
+
 }
 
 export async function analyzeWithGemini(emailText, ruleData, apiKey, model = DEFAULT_MODEL) {
@@ -108,14 +109,20 @@ export async function analyzeWithGemini(emailText, ruleData, apiKey, model = DEF
     throw new Error(`Empty response from Gemini.\n\nfinishReason: ${reason ?? 'unknown'}`);
   }
 
-  const cleaned = rawText.replace(/^```(?:json)?\s*/m, '').replace(/\s*```$/m, '').trim();
+ // 1. Aggressively isolate the JSON brackets
+  // This ignores any "Here is your JSON:" text or markdown backticks
+  const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+  
+  if (!jsonMatch) {
+      console.error("Raw Gemini Output:", rawText);
+      throw new Error('Gemini response did not contain a recognizable JSON object.');
+  }
+
+  // 2. Parse the isolated block
   try {
-    return JSON.parse(cleaned);
-  } catch {
-    const match = cleaned.match(/\{[\s\S]+\}/);
-    if (match) {
-      try { return JSON.parse(match[0]); } catch { /* fall through */ }
-    }
-    throw new Error('Could not parse Gemini response as JSON. Try again.');
+    return JSON.parse(jsonMatch[0]);
+  } catch (parseError) {
+    console.error("Raw Gemini Output:", rawText);
+    throw new Error('Could not parse Gemini response. The model generated invalid JSON syntax. Try again.');
   }
 }
