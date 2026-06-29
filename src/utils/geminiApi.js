@@ -49,7 +49,7 @@ export async function analyzeWithGemini(emailText, ruleData, apiKey, model = DEF
     generationConfig: {
       temperature: 0.1,
       topP: 0.95,
-      maxOutputTokens: 1500,
+      maxOutputTokens: 5000,
     },
   };
 
@@ -119,4 +119,4 @@ const data      = await response.json();
     console.error("Raw Gemini Output:", rawText);
     throw new Error('Could not parse Gemini response. The model generated invalid JSON syntax.');
   }
-} // <-- Make sure the closing bracket for the analyzeWithGemini function is right here
+} 
