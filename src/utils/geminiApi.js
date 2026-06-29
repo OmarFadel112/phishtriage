@@ -1,22 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════════════
 //  src/utils/geminiApi.js
-//
-//  Uses the stable v1 endpoint (not v1beta) — more broadly available
-//  across regions and API key tiers.
-//
-//  responseMimeType removed — it is a v1beta-only feature and can silently
-//  cause 429/400 errors on v1. JSON output is enforced through the prompt
-//  instead, which works on every model and endpoint version.
+//  Uses the stable v1 endpoint (not v1beta).
+//  responseMimeType removed — v1beta-only, causes errors on v1.
+//  JSON output enforced through the prompt instead.
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Change this if you need to switch models without touching anything else.
-// Confirmed free-tier models (June 2026):
-//   gemini-2.0-flash        ← default, fast, best for this tool
-//   gemini-2.0-flash-lite   ← higher RPM, slightly less capable
-//   gemini-2.5-flash        ← newest, best quality, same free tier
 export const DEFAULT_MODEL = 'gemini-2.0-flash';
-
-// v1 (stable) — not v1beta — works across more regions and key tiers
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1/models';
 
 function buildPrompt(emailText, ruleData) {
@@ -71,46 +60,54 @@ export async function analyzeWithGemini(emailText, ruleData, apiKey, model = DEF
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),
     });
-  } catch (networkError) {
-    throw new Error(`Network error — check your connection. (${networkError.message})`);
+  } catch (networkErr) {
+    throw new Error(`Network error — check your connection.\n\nDetails: ${networkErr.message}`);
   }
 
-  // Always parse the error body so we show Google's actual message,
-  // not a generic label that hides what really went wrong.
   if (!response.ok) {
+    // ── Always show Google's real error message verbatim ──────────────────
+    // Never replace it with a generic label — the raw message contains the
+    // quota type, error code, and region info needed for diagnosis.
     let googleMessage = `HTTP ${response.status}`;
+    let googleStatus  = '';
     try {
-      const errData = await response.json();
-      googleMessage = errData?.error?.message || googleMessage;
-    } catch { /* body wasn't JSON, keep status code */ }
+      const errData  = await response.json();
+      googleMessage  = errData?.error?.message  || googleMessage;
+      googleStatus   = errData?.error?.status   || '';
+    } catch { /* body wasn't JSON */ }
 
-    // Append a human-readable hint without replacing the real message.
-    let hint = '';
-    if (response.status === 400)
-      hint = 'Check your API key format and that the model name is correct.';
-    else if (response.status === 401 || response.status === 403)
-      hint = 'API key is invalid or lacks permission. Verify it at aistudio.google.com.';
-    else if (response.status === 404)
-      hint = `Model "${model}" not found — try a different model from the selector.`;
-    else if (response.status === 429)
-      hint = 'Quota hit — try a different model, wait 60 s, or check your daily limit at aistudio.google.com.';
-    else if (response.status >= 500)
-      hint = 'Google server error — wait a moment and try again.';
+    // Append a short actionable hint BELOW the real message, not instead of it
+    const hints = {
+      400: '→ Check the model name in the selector and that your API key format is correct.',
+      401: '→ API key rejected. Verify it at aistudio.google.com/app/apikey.',
+      403: '→ API key lacks permission. Verify it at aistudio.google.com/app/apikey.',
+      404: `→ Model "${model}" not found on this endpoint. Try a different model from the dropdown.`,
+      429: '→ Quota or rate limit hit. Check your usage at aistudio.google.com → quotas. Try a different model or wait for the quota window to reset.',
+      500: '→ Google server error — wait a moment and try again.',
+      503: '→ Google service temporarily unavailable — wait a moment and try again.',
+    };
+    const hint = hints[response.status] || '';
 
-    throw new Error(hint ? `${googleMessage}\n\n${hint}` : googleMessage);
+    // Format: real Google message first, then hint, then status code for debugging
+    const displayMessage = [
+      googleMessage,
+      hint,
+      googleStatus ? `[Status code: ${googleStatus} / HTTP ${response.status}]` : `[HTTP ${response.status}]`,
+    ].filter(Boolean).join('\n\n');
+
+    throw new Error(displayMessage);
   }
 
-  const data = await response.json();
+  const data    = await response.json();
   const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 
   if (!rawText) {
     const reason = data?.candidates?.[0]?.finishReason;
     if (reason === 'SAFETY')
-      throw new Error('Gemini blocked the request (safety filter). Strip any PII from the email and try again.');
-    throw new Error(`Empty response from Gemini (finishReason: ${reason ?? 'unknown'}).`);
+      throw new Error('Gemini blocked the request (safety filter).\n\nTry removing personal data from the email before submitting.');
+    throw new Error(`Empty response from Gemini.\n\nfinishReason: ${reason ?? 'unknown'}`);
   }
 
-  // Strip any accidental markdown fences and parse
   const cleaned = rawText.replace(/^```(?:json)?\s*/m, '').replace(/\s*```$/m, '').trim();
   try {
     return JSON.parse(cleaned);
