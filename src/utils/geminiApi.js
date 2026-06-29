@@ -45,12 +45,13 @@ Return exactly this JSON structure (replace the example values with your actual 
 export async function analyzeWithGemini(emailText, ruleData, apiKey, model = DEFAULT_MODEL) {
   const endpoint = `${BASE_URL}/${model}:generateContent?key=${apiKey}`;
 
-  const requestBody = {
+ const requestBody = {
     contents: [{ parts: [{ text: buildPrompt(emailText, ruleData) }] }],
     generationConfig: {
       temperature: 0.1,
       topP: 0.95,
       maxOutputTokens: 1500,
+      responseMimeType: "application/json", // Now supported on stable v1
     },
   };
 
@@ -98,31 +99,26 @@ export async function analyzeWithGemini(emailText, ruleData, apiKey, model = DEF
 
     throw new Error(displayMessage);
   }
+const data      = await response.json();
+  const candidate = data?.candidates?.[0];
+  const rawText   = candidate?.content?.parts?.[0]?.text ?? '';
+  const reason    = candidate?.finishReason;
 
-  const data    = await response.json();
-  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+// 1. Catch ALL mid-stream aborts (SAFETY, RECITATION, MAX_TOKENS)
+  if (reason && reason !== 'STOP') {
+    console.error("Partial Gemini Output before abort:", rawText);
+    throw new Error(`Google API aborted the generation early.\nFinish Reason: ${reason}\nCheck your browser console for details.`);
+  }
 
   if (!rawText) {
-    const reason = data?.candidates?.[0]?.finishReason;
-    if (reason === 'SAFETY')
-      throw new Error('Gemini blocked the request (safety filter).\n\nTry removing personal data from the email before submitting.');
-    throw new Error(`Empty response from Gemini.\n\nfinishReason: ${reason ?? 'unknown'}`);
+    throw new Error(`Empty response from Gemini.\nFinish Reason: ${reason ?? 'unknown'}`);
   }
 
- // 1. Aggressively isolate the JSON brackets
-  // This ignores any "Here is your JSON:" text or markdown backticks
-  const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-  
-  if (!jsonMatch) {
-      console.error("Raw Gemini Output:", rawText);
-      throw new Error('Gemini response did not contain a recognizable JSON object.');
-  }
-
-  // 2. Parse the isolated block
+  // 2. Parse the native JSON response
   try {
-    return JSON.parse(jsonMatch[0]);
+    return JSON.parse(rawText.trim());
   } catch (parseError) {
     console.error("Raw Gemini Output:", rawText);
-    throw new Error('Could not parse Gemini response. The model generated invalid JSON syntax. Try again.');
+    throw new Error('Could not parse Gemini response. The model generated invalid JSON syntax.');
   }
-}
+} // <-- Make sure the closing bracket for the analyzeWithGemini function is right here
