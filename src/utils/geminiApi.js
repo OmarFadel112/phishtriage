@@ -50,8 +50,7 @@ export async function analyzeWithGemini(emailText, ruleData, apiKey, model = DEF
     generationConfig: {
       temperature: 0.1,
       topP: 0.95,
-      maxOutputTokens: 1500,
-      responseMimeType: "application/json", // Now supported on stable v1
+      maxOutputTokens: 1500
     },
   };
 
